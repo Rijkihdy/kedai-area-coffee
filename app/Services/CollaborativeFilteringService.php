@@ -265,4 +265,44 @@ class CollaborativeFilteringService
 
         return $hasil;
     }
+
+    /**
+ * Mengambil menu yang paling mirip dengan menu tertentu.
+ * Digunakan untuk fitur "Sering Dibeli Bersama".
+ */
+public function rekomendasiMenuPendamping(int $menuId): array
+{
+    // Bangun matriks interaksi
+    $matriks = $this->buatMatriksInteraksi();
+
+    // Hitung similarity antar menu
+    $similarity = $this->hitungSimilarityAntarMenu($matriks);
+
+    // Ambil K menu yang paling mirip
+    $neighbors = $this->nearestNeighbor($similarity, $menuId);
+
+    if (empty($neighbors)) {
+        return [];
+    }
+
+    $menus = Menu::whereIn('id_menu', array_keys($neighbors))
+        ->get()
+        ->keyBy('id_menu');
+
+    $hasil = [];
+
+    foreach ($neighbors as $id => $score) {
+
+        if (!$menus->has($id)) {
+            continue;
+        }
+
+        $hasil[] = [
+            'menu' => $menus[$id],
+            'similarity' => round($score, 4),
+        ];
+    }
+
+    return $hasil;
+}
 }

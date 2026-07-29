@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\KategoriMenu;
 use App\Models\Menu;
 use Illuminate\Http\Request;
+use App\Services\CollaborativeFilteringService;
 
 /**
  * Use case: "Melihat daftar menu" (Pelanggan) - Tabel 3.6 no.5
@@ -29,4 +30,15 @@ class MenuPublikController extends Controller
 
         return view('pelanggan.menu', compact('menu', 'kategori'));
     }
+    public function show(Menu $menu, CollaborativeFilteringService $cf)
+{
+    $menu->load('kategori');
+
+    $menuPendamping = $cf->rekomendasiMenuPendamping($menu->id_menu);
+
+    return view('dashboard.menu-detail', compact(
+        'menu',
+        'menuPendamping'
+    ));
+}
 }

@@ -45,6 +45,7 @@ Route::middleware('auth')->group(function () {
     // ---------- Pelanggan ----------
     Route::middleware('role:pelanggan')->prefix('pelanggan')->name('pelanggan.')->group(function () {
         Route::get('/menu', [MenuPublikController::class, 'index'])->name('menu.index');
+        Route::get('/menu/{menu}', [MenuPublikController::class, 'show'])->name('menu.show');
 
         Route::get('/keranjang', [PemesananController::class, 'keranjang'])->name('keranjang');
         Route::post('/keranjang/{menu}', [PemesananController::class, 'tambah'])->name('keranjang.tambah');

@@ -15,7 +15,7 @@
         </h2>
 
         <p class="text-muted mb-0">
-            Menu pilihan khusus berdasarkan riwayat pemesanan Anda.
+            Menu pilihan khusus untuk Anda.
         </p>
 
     </div>
@@ -56,12 +56,41 @@
 
     <div class="card border-0 shadow-sm rounded-4 h-100 menu-card">
 
-        <div class="menu-image">
+      <div class="menu-image">
 
-            <i class="bi bi-stars"></i>
+    @if(!empty($r->menu->gambar))
 
-        </div>
+        <img
+            src="{{ asset('storage/'.$r->menu->gambar) }}"
+            alt="{{ $r->menu->nama_menu }}"
+            class="w-100 h-100 object-fit-cover rounded-top-4">
 
+    @else
+
+        @php
+            $kategori = strtolower($r->menu->kategori->nama_kategori ?? '');
+
+            if(str_contains($kategori,'coffee')){
+                $image='https://images.unsplash.com/featured/?coffee';
+            }elseif(str_contains($kategori,'tea')){
+                $image='https://images.unsplash.com/featured/?tea';
+            }elseif(str_contains($kategori,'dessert')){
+                $image='https://images.unsplash.com/featured/?cake';
+            }elseif(str_contains($kategori,'snack')){
+                $image='https://images.unsplash.com/featured/?snack';
+            }else{
+                $image='https://images.unsplash.com/featured/?cafe-drink';
+            }
+        @endphp
+
+        <img
+            src="{{ $image }}"
+            alt="{{ $r->menu->nama_menu }}"
+            class="w-100 h-100 object-fit-cover rounded-top-4">
+
+    @endif
+
+</div>
         <div class="card-body d-flex flex-column">
 
             <span class="badge bg-light text-secondary border align-self-start mb-2">

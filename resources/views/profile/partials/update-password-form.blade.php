@@ -2,9 +2,9 @@
 
     <div class="mb-4">
 
-        <h4 class="fw-bold text-dark">
+        <!-- <h4 class="fw-bold text-dark">
             Ubah Password
-        </h4>
+        </h4> -->
 
         <p class="text-muted">
             Gunakan password yang kuat agar akun Anda tetap aman.

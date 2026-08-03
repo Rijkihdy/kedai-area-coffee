@@ -2,9 +2,9 @@
 
     <div class="mb-4">
 
-        <h4 class="fw-bold text-dark">
+        <!-- <h4 class="fw-bold text-dark">
             Informasi Profil
-        </h4>
+        </h4> -->
 
         <p class="text-muted">
             Perbarui nama dan alamat email akun Anda.

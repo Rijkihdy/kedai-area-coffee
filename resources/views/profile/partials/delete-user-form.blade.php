@@ -2,9 +2,9 @@
 
     <div class="mb-4">
 
-        <h4 class="fw-bold text-danger">
+        <!-- <h4 class="fw-bold text-danger">
             Hapus Akun
-        </h4>
+        </h4> -->
 
         <p class="text-muted">
             Menghapus akun akan menghilangkan seluruh data akun secara permanen. Tindakan ini tidak dapat dibatalkan.

@@ -109,9 +109,10 @@
     color:#fff;
 }
 
-.pagination-area .btn{
-    min-width:42px;
+.pagination {
+    margin: 0;
 }
+
 .btn-primary{
     background:#212529 !important;
     border-color:#212529 !important;

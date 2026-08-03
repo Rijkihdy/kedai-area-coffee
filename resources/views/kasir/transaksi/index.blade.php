@@ -27,5 +27,5 @@
         </table>
     </div>
 </div>
-<div class="mt-3">{{ $transaksi->links() }}</div>
+<div class="mt-3 d-flex justify-content-end">{{ $transaksi->links() }}</div>
 @endsection

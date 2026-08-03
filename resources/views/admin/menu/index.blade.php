@@ -44,5 +44,5 @@
         </table>
     </div>
 </div>
-<div class="mt-3">{{ $menu->links() }}</div>
+<div class="mt-3 d-flex justify-content-end">{{ $menu->links() }}</div>
 @endsection

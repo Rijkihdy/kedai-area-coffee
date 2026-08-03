@@ -38,5 +38,5 @@
         </table>
     </div>
 </div>
-<div class="mt-3">{{ $pesanan->links() }}</div>
+<div class="mt-3 d-flex justify-content-end">{{ $pesanan->links() }}</div>
 @endsection

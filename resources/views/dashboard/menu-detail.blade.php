@@ -110,14 +110,14 @@
 
             <div class="mt-auto">
 
-                <a href="{{ route('pelanggan.keranjang.tambah',$menu->id_menu) }}"
-                   class="btn btn-dark btn-lg w-100">
-
-                    <i class="bi bi-cart-plus me-2"></i>
-
-                    Tambah ke Keranjang
-
-                </a>
+                <form action="{{ route('pelanggan.keranjang.tambah', $menu->id_menu) }}" method="POST" class="w-100">
+                    @csrf
+                    <input type="hidden" name="jumlah" value="1">
+                    <button type="submit" class="btn btn-dark btn-lg w-100">
+                        <i class="bi bi-cart-plus me-2"></i>
+                        Tambah ke Keranjang
+                    </button>
+                </form>
 
             </div>
 

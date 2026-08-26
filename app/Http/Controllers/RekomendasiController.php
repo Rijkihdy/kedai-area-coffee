@@ -2,50 +2,126 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Menu;
 use App\Models\Rekomendasi;
 use App\Services\CollaborativeFilteringService;
 use Illuminate\Http\Request;
 
-/**
- * Use case: "Melihat rekomendasi menu" (Pelanggan) - Tabel 3.6 no.7
- * Halaman: "Halaman Rekomendasi Menu" - Tabel 3.20 no.6
- */
 class RekomendasiController extends Controller
 {
-    public function index(Request $request, CollaborativeFilteringService $cf)
-    {
+    /**
+     * Halaman rekomendasi menu pelanggan.
+     */
+    public function index(
+        Request $request,
+        CollaborativeFilteringService $cf
+    ) {
         $pelanggan = $request->user()->pelanggan;
 
+        /*
+         * Kalau user bukan pelanggan.
+         */
         if (!$pelanggan) {
-            return view('pelanggan.rekomendasi', ['rekomendasi' => collect(), 'populer' => []]);
+            return view('pelanggan.rekomendasi', [
+                'rekomendasi' => collect(),
+                'populer' => [],
+            ]);
         }
 
-        $ada = Rekomendasi::where('id_pelanggan', $pelanggan->id_pelanggan)->exists();
+        $pelangganId = $pelanggan->id_pelanggan;
 
-        // Cold start: pelanggan belum pernah pesan -> tampilkan menu populer
-        if (!$ada) {
+        /*
+         * Cek apakah pelanggan sudah memberikan rating.
+         *
+         * Karena sekarang rekomendasi dibuat berdasarkan
+         * data rating, bukan hanya berdasarkan transaksi.
+         */
+        $jumlahRating = \DB::table('rating')
+            ->where('id_pelanggan', $pelangganId)
+            ->count();
+
+        /*
+         * =====================================================
+         * COLD START
+         * =====================================================
+         *
+         * Kalau pelanggan belum mempunyai rating,
+         * belum bisa dilakukan prediksi rating personal.
+         *
+         * Maka tampilkan menu populer.
+         */
+        if ($jumlahRating === 0) {
+
             $populer = $cf->rekomendasiPopuler(6);
 
-            return view('pelanggan.rekomendasi', ['rekomendasi' => collect(), 'populer' => $populer]);
+            return view('pelanggan.rekomendasi', [
+                'rekomendasi' => collect(),
+                'populer' => $populer,
+            ]);
         }
 
-        $rekomendasi = Rekomendasi::where('id_pelanggan', $pelanggan->id_pelanggan)
+        /*
+         * =====================================================
+         * GENERATE REKOMENDASI
+         * =====================================================
+         *
+         * Kita cek apakah pelanggan sudah mempunyai
+         * hasil rekomendasi.
+         */
+        $adaRekomendasi = Rekomendasi::where(
+            'id_pelanggan',
+            $pelangganId
+        )->exists();
+
+        /*
+         * Kalau belum ada, generate sekarang.
+         */
+        if (!$adaRekomendasi) {
+
+            $cf->simpanRekomendasiUntukPelanggan(
+                $pelangganId
+            );
+        }
+
+        /*
+         * Ambil hasil rekomendasi.
+         */
+        $rekomendasi = Rekomendasi::where(
+            'id_pelanggan',
+            $pelangganId
+        )
             ->with('menu.kategori')
             ->orderByDesc('skor_rekomendasi')
             ->get();
 
-        return view('pelanggan.rekomendasi', ['rekomendasi' => $rekomendasi, 'populer' => []]);
+        return view('pelanggan.rekomendasi', [
+            'rekomendasi' => $rekomendasi,
+            'populer' => [],
+        ]);
     }
 
-    /** Tombol "Hitung ulang rekomendasi" manual (opsional, untuk demo). */
-    public function hitungUlang(Request $request, CollaborativeFilteringService $cf)
-    {
+    /**
+     * Tombol "Hitung Ulang Rekomendasi".
+     */
+    public function hitungUlang(
+        Request $request,
+        CollaborativeFilteringService $cf
+    ) {
         $pelanggan = $request->user()->pelanggan;
+
         abort_if(!$pelanggan, 403);
 
-        $cf->simpanRekomendasiUntukPelanggan($pelanggan->id_pelanggan);
+        /*
+         * Hitung ulang berdasarkan data rating terbaru.
+         */
+        $cf->simpanRekomendasiUntukPelanggan(
+            $pelanggan->id_pelanggan
+        );
 
-        return redirect()->route('pelanggan.rekomendasi')->with('sukses', 'Rekomendasi berhasil diperbarui.');
+        return redirect()
+            ->route('pelanggan.rekomendasi')
+            ->with(
+                'sukses',
+                'Rekomendasi berhasil diperbarui.'
+            );
     }
 }

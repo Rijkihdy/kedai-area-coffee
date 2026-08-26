@@ -2,28 +2,15 @@
 
 namespace App\Services;
 
-use App\Models\DetailPesanan;
 use App\Models\Menu;
 use App\Models\Pelanggan;
 use App\Models\Rekomendasi;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Item-Based Collaborative Filtering.
- *
- * Mengikuti BAB III laporan TA:
- * - 3.4.2 : bentuk matriks pelanggan x menu dari riwayat pemesanan (jumlah menu yang dipesan).
- * - 3.5   : hitung similarity antar menu (Cosine Similarity) lalu ambil K nearest neighbor.
- * - 3.6.2 : Pred(u,i) = Σ(sim(i,j) x R(u,j)) / Σ|sim(i,j)|
- * - 3.7   : ranking hasil prediksi lalu ambil Top-N sebagai rekomendasi.
- */
 class CollaborativeFilteringService
 {
-    /** Jumlah tetangga terdekat (nearest neighbor) yang dipakai per menu target. */
     protected int $k = 5;
-
-    /** Jumlah rekomendasi (Top-N) yang disimpan/ditampilkan per pelanggan. */
     protected int $topN = 5;
 
     public function __construct(?int $k = null, ?int $topN = null)
@@ -31,22 +18,47 @@ class CollaborativeFilteringService
         if ($k !== null) {
             $this->k = $k;
         }
+
         if ($topN !== null) {
             $this->topN = $topN;
         }
     }
 
     /**
-     * Bentuk matriks interaksi pelanggan x menu.
-     * Nilai matriks = total jumlah menu tersebut dipesan oleh pelanggan (dari detail_pesanan).
+     * =========================================================
+     * 1. MEMBUAT MATRIKS RATING
+     * =========================================================
      *
-     * @return array<int, array<int, float>> [id_pelanggan => [id_menu => nilai]]
+     * Bentuk:
+     *
+     * [
+     *   id_pelanggan => [
+     *       id_menu => nilai_rating
+     *   ]
+     * ]
+     *
+     * Contoh:
+     *
+     * [
+     *   2 => [
+     *       1 => 4,
+     *       15 => 4
+     *   ],
+     *   3 => [
+     *       6 => 5,
+     *       7 => 5
+     *   ]
+     * ]
      */
-    public function buatMatriksInteraksi(): array
+    public function buatMatriksRating(): array
     {
-        $rows = DetailPesanan::query()
-            ->join('pesanan', 'pesanan.id_pesanan', '=', 'detail_pesanan.id_pesanan')
-            ->select('pesanan.id_pelanggan', 'detail_pesanan.id_menu', 'detail_pesanan.jumlah')
+        $rows = DB::table('rating')
+            ->select(
+                'id_pelanggan',
+                'id_menu',
+                'nilai_rating'
+            )
+            ->orderBy('id_pelanggan')
             ->get();
 
         $matriks = [];
@@ -54,43 +66,69 @@ class CollaborativeFilteringService
         foreach ($rows as $row) {
             $pelangganId = (int) $row->id_pelanggan;
             $menuId = (int) $row->id_menu;
-            $matriks[$pelangganId][$menuId] = ($matriks[$pelangganId][$menuId] ?? 0) + (float) $row->jumlah;
+            $rating = (float) $row->nilai_rating;
+
+            $matriks[$pelangganId][$menuId] = $rating;
         }
 
         return $matriks;
     }
 
     /**
-     * Hitung cosine similarity antar semua pasangan menu berdasarkan matriks interaksi.
-     *
-     * sim(i,j) = (vektor_i . vektor_j) / (||vektor_i|| x ||vektor_j||)
-     * vektor menu i dibentuk dari kolom nilai interaksi seluruh pelanggan terhadap menu i.
-     *
-     * @return array<int, array<int, float>> [id_menu_i => [id_menu_j => similarity]]
+     * =========================================================
+     * 2. TRANSPOSE:
+     *    pelanggan x menu
+     *    menjadi
+     *    menu x pelanggan
+     * =========================================================
      */
-    public function hitungSimilarityAntarMenu(array $matriksInteraksi): array
+    protected function buatVektorMenu(array $matriksRating): array
     {
-        // Balik matriks pelanggan x menu -> menu x pelanggan (vektor per menu)
         $vektorMenu = [];
-        foreach ($matriksInteraksi as $pelangganId => $menuValues) {
-            foreach ($menuValues as $menuId => $nilai) {
-                $vektorMenu[$menuId][$pelangganId] = $nilai;
+
+        foreach ($matriksRating as $pelangganId => $menuRatings) {
+
+            foreach ($menuRatings as $menuId => $rating) {
+
+                $vektorMenu[$menuId][$pelangganId] = $rating;
             }
         }
 
+        return $vektorMenu;
+    }
+
+    /**
+     * =========================================================
+     * 3. COSINE SIMILARITY ANTAR MENU
+     * =========================================================
+     */
+    public function hitungSimilarityAntarMenu(
+        array $matriksRating
+    ): array {
+
+        $vektorMenu = $this->buatVektorMenu($matriksRating);
+
         $menuIds = array_keys($vektorMenu);
+
         $similarity = [];
 
         foreach ($menuIds as $i) {
+
             foreach ($menuIds as $j) {
+
                 if ($i === $j) {
                     continue;
                 }
+
                 if (isset($similarity[$i][$j])) {
-                    continue; // simetris, sudah dihitung
+                    continue;
                 }
 
-                $sim = $this->cosineSimilarity($vektorMenu[$i], $vektorMenu[$j]);
+                $sim = $this->cosineSimilarity(
+                    $vektorMenu[$i],
+                    $vektorMenu[$j]
+                );
+
                 $similarity[$i][$j] = $sim;
                 $similarity[$j][$i] = $sim;
             }
@@ -99,18 +137,34 @@ class CollaborativeFilteringService
         return $similarity;
     }
 
-    protected function cosineSimilarity(array $vektorA, array $vektorB): float
-    {
-        $pelangganGabungan = array_unique(array_merge(array_keys($vektorA), array_keys($vektorB)));
+    /**
+     * =========================================================
+     * 4. COSINE SIMILARITY
+     * =========================================================
+     */
+    protected function cosineSimilarity(
+        array $vektorA,
+        array $vektorB
+    ): float {
+
+        $pelangganGabungan = array_unique(
+            array_merge(
+                array_keys($vektorA),
+                array_keys($vektorB)
+            )
+        );
 
         $dotProduct = 0.0;
         $normA = 0.0;
         $normB = 0.0;
 
-        foreach ($pelangganGabungan as $pid) {
-            $a = $vektorA[$pid] ?? 0.0;
-            $b = $vektorB[$pid] ?? 0.0;
+        foreach ($pelangganGabungan as $pelangganId) {
+
+            $a = $vektorA[$pelangganId] ?? 0.0;
+            $b = $vektorB[$pelangganId] ?? 0.0;
+
             $dotProduct += $a * $b;
+
             $normA += $a * $a;
             $normB += $b * $b;
         }
@@ -119,190 +173,405 @@ class CollaborativeFilteringService
             return 0.0;
         }
 
-        return $dotProduct / (sqrt($normA) * sqrt($normB));
+        return $dotProduct /
+            (sqrt($normA) * sqrt($normB));
     }
 
     /**
-     * Ambil K nearest neighbor (menu paling mirip) untuk sebuah menu target.
+     * =========================================================
+     * 5. K-NEAREST NEIGHBOR
+     * =========================================================
+     */
+    public function nearestNeighbor(
+        array $similarityMatrix,
+        int $menuTargetId
+    ): array {
+
+        $neighbors = $similarityMatrix[$menuTargetId] ?? [];
+
+        arsort($neighbors);
+
+        return array_slice(
+            $neighbors,
+            0,
+            $this->k,
+            true
+        );
+    }
+
+    /**
+     * =========================================================
+     * 6. PREDIKSI RATING
      *
-     * @return array<int, float> [id_menu_tetangga => similarity] terurut descending, dibatasi K
+     * Pred(u,i) =
+     *
+     * SUM(sim(i,j) * R(u,j))
+     * -----------------------
+     * SUM(abs(sim(i,j)))
+     *
+     * Sekarang R(u,j) benar-benar NILAI RATING.
+     * =========================================================
      */
-    public function nearestNeighbor(array $similarityMatrix, int $menuTargetId): array
-    {
-        $tetangga = $similarityMatrix[$menuTargetId] ?? [];
-        arsort($tetangga);
+    public function prediksiRating(
+        array $similarityMatrix,
+        array $riwayatRating,
+        int $menuTargetId
+    ): float {
 
-        return array_slice($tetangga, 0, $this->k, true);
-    }
-
-    /**
-     * Prediksi skor ketertarikan pelanggan terhadap satu menu target.
-     * Pred(u,i) = Σ(sim(i,j) x R(u,j)) / Σ|sim(i,j)|
-     * j hanya diambil dari menu yang pernah dipesan pelanggan DAN termasuk
-     * nearest neighbor dari menu target.
-     */
-    public function prediksiSkor(array $similarityMatrix, array $riwayatPelanggan, int $menuTargetId): float
-    {
-        $tetangga = $this->nearestNeighbor($similarityMatrix, $menuTargetId);
+        $neighbors = $this->nearestNeighbor(
+            $similarityMatrix,
+            $menuTargetId
+        );
 
         $pembilang = 0.0;
         $penyebut = 0.0;
 
-        foreach ($tetangga as $menuJ => $sim) {
-            if (!isset($riwayatPelanggan[$menuJ])) {
-                continue; // pelanggan belum pernah memesan menu tetangga ini
+        foreach ($neighbors as $menuJ => $similarity) {
+
+            /*
+             * Hanya gunakan menu tetangga
+             * yang sudah diberi rating oleh pelanggan.
+             */
+            if (!array_key_exists($menuJ, $riwayatRating)) {
+                continue;
             }
 
-            $rUj = $riwayatPelanggan[$menuJ];
-            $pembilang += $sim * $rUj;
-            $penyebut += abs($sim);
+            $ratingUser = (float) $riwayatRating[$menuJ];
+
+            $pembilang +=
+                $similarity * $ratingUser;
+
+            $penyebut += abs($similarity);
         }
 
         if ($penyebut <= 0) {
             return 0.0;
         }
 
-        return $pembilang / $penyebut;
+        $prediksi = $pembilang / $penyebut;
+
+        /*
+         * Rating menggunakan skala 1-5.
+         * Jadi hasil prediksi dibatasi 1-5.
+         */
+        return max(
+            1.0,
+            min(5.0, $prediksi)
+        );
     }
 
     /**
-     * Hasilkan Top-N rekomendasi untuk satu pelanggan.
-     *
-     * @return array<int, array{id_menu:int, skor:float}>
+     * =========================================================
+     * 7. REKOMENDASI UNTUK SATU PELANGGAN
+     * =========================================================
      */
-    public function rekomendasikanUntukPelanggan(int $pelangganId): array
-    {
-        $matriks = $this->buatMatriksInteraksi();
-        $similarity = $this->hitungSimilarityAntarMenu($matriks);
-        $riwayatPelanggan = $matriks[$pelangganId] ?? [];
+    public function rekomendasikanUntukPelanggan(
+        int $pelangganId
+    ): array {
 
-        $semuaMenuId = Menu::query()->pluck('id_menu')->all();
-        $skorPrediksi = [];
+        /*
+         * Matriks sekarang berasal dari TABEL RATING.
+         */
+        $matriksRating =
+            $this->buatMatriksRating();
+
+        /*
+         * Hitung similarity antar menu.
+         */
+        $similarity =
+            $this->hitungSimilarityAntarMenu(
+                $matriksRating
+            );
+
+        /*
+         * Ambil rating pelanggan.
+         */
+        $riwayatRating =
+            $matriksRating[$pelangganId] ?? [];
+
+        /*
+         * Semua menu.
+         */
+        $semuaMenuId =
+            Menu::query()
+                ->pluck('id_menu')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+        $hasilPrediksi = [];
 
         foreach ($semuaMenuId as $menuId) {
-            if (isset($riwayatPelanggan[$menuId])) {
-                continue; // hanya rekomendasikan menu yang belum pernah dipesan
+
+            /*
+             * Jangan rekomendasikan menu
+             * yang sudah pernah diberi rating.
+             */
+            if (array_key_exists(
+                $menuId,
+                $riwayatRating
+            )) {
+                continue;
             }
 
-            $skor = $this->prediksiSkor($similarity, $riwayatPelanggan, $menuId);
+            $prediksi =
+                $this->prediksiRating(
+                    $similarity,
+                    $riwayatRating,
+                    $menuId
+                );
 
-            if ($skor > 0) {
-                $skorPrediksi[$menuId] = $skor;
+            /*
+             * Hanya masukkan prediksi valid.
+             */
+            if ($prediksi > 0) {
+
+                $hasilPrediksi[$menuId] =
+                    $prediksi;
             }
         }
 
-        arsort($skorPrediksi);
-        $topN = array_slice($skorPrediksi, 0, $this->topN, true);
+        /*
+         * Rating terbesar = rekomendasi terbaik.
+         */
+        arsort($hasilPrediksi);
+
+        /*
+         * Ambil Top-N.
+         */
+        $topN = array_slice(
+            $hasilPrediksi,
+            0,
+            $this->topN,
+            true
+        );
 
         $hasil = [];
-        foreach ($topN as $menuId => $skor) {
-            $hasil[] = ['id_menu' => $menuId, 'skor' => round($skor, 4)];
+
+        foreach ($topN as $menuId => $prediksi) {
+
+            $hasil[] = [
+                'id_menu' => (int) $menuId,
+                'prediksi_rating' =>
+                    round($prediksi, 2),
+            ];
         }
 
         return $hasil;
     }
 
     /**
-     * Hitung ulang & simpan rekomendasi untuk SATU pelanggan ke tabel `rekomendasi`.
-     * Dipanggil setelah pelanggan menyelesaikan pesanan / memberi rating baru.
+     * =========================================================
+     * 8. SIMPAN REKOMENDASI
+     * =========================================================
      */
-    public function simpanRekomendasiUntukPelanggan(int $pelangganId): void
-    {
-        $hasil = $this->rekomendasikanUntukPelanggan($pelangganId);
+    public function simpanRekomendasiUntukPelanggan(
+        int $pelangganId
+    ): void {
 
-        Rekomendasi::where('id_pelanggan', $pelangganId)->delete();
+        $hasil =
+            $this->rekomendasikanUntukPelanggan(
+                $pelangganId
+            );
 
+        /*
+         * Hapus rekomendasi lama.
+         */
+        Rekomendasi::where(
+            'id_pelanggan',
+            $pelangganId
+        )->delete();
+
+        /*
+         * Simpan rekomendasi baru.
+         */
         foreach ($hasil as $item) {
+
             Rekomendasi::create([
-                'id_pelanggan' => $pelangganId,
-                'id_menu' => $item['id_menu'],
-                'skor_rekomendasi' => $item['skor'],
-                'tanggal_dibuat' => Carbon::now(),
+                'id_pelanggan' =>
+                    $pelangganId,
+
+                'id_menu' =>
+                    $item['id_menu'],
+
+                'skor_rekomendasi' =>
+                    $item['prediksi_rating'],
+
+                'tanggal_dibuat' =>
+                    Carbon::now(),
             ]);
         }
     }
 
     /**
-     * Hitung ulang & simpan rekomendasi untuk SEMUA pelanggan.
-     * Cocok dijalankan sebagai scheduled job / artisan command harian.
+     * =========================================================
+     * 9. GENERATE UNTUK SEMUA PELANGGAN
+     * =========================================================
      */
     public function jalankanUntukSemuaPelanggan(): void
     {
-        $pelangganIds = Pelanggan::query()->pluck('id_pelanggan')->all();
+        $pelangganIds =
+            Pelanggan::query()
+                ->pluck('id_pelanggan')
+                ->all();
 
         foreach ($pelangganIds as $pelangganId) {
-            $this->simpanRekomendasiUntukPelanggan($pelangganId);
+
+            $this->simpanRekomendasiUntukPelanggan(
+                (int) $pelangganId
+            );
         }
     }
 
     /**
-     * Fallback untuk pelanggan baru yang belum punya riwayat pemesanan (cold start):
-     * rekomendasikan menu paling populer (paling banyak dipesan / rating tertinggi).
+     * =========================================================
+     * 10. FALLBACK PELANGGAN BARU
+     * =========================================================
+     *
+     * Pelanggan belum punya rating.
+     * Untuk sementara gunakan menu paling populer
+     * berdasarkan jumlah penjualan.
      */
-    public function rekomendasiPopuler(int $limit = 5): array
-    {
-        $terjual = DetailPesanan::query()
-            ->select('id_menu', DB::raw('SUM(jumlah) as total_terjual'))
+    public function rekomendasiPopuler(
+        int $limit = 5
+    ): array {
+
+        $terjual = DB::table('detail_pesanan')
+            ->select(
+                'id_menu',
+                DB::raw(
+                    'SUM(jumlah) AS total_terjual'
+                )
+            )
             ->groupBy('id_menu')
             ->orderByDesc('total_terjual')
             ->limit($limit)
-            ->pluck('total_terjual', 'id_menu');
+            ->pluck(
+                'total_terjual',
+                'id_menu'
+            );
 
         if ($terjual->isEmpty()) {
-            return Menu::query()->limit($limit)->get()->toArray();
+
+            return Menu::query()
+                ->limit($limit)
+                ->get()
+                ->toArray();
         }
 
-        $menus = Menu::query()->whereIn('id_menu', $terjual->keys())->get()->keyBy('id_menu');
+        $menus =
+            Menu::query()
+                ->whereIn(
+                    'id_menu',
+                    $terjual->keys()
+                )
+                ->get()
+                ->keyBy('id_menu');
 
         $hasil = [];
+
         foreach ($terjual as $menuId => $total) {
-            if ($menus->has($menuId)) {
-                $menu = $menus->get($menuId)->toArray();
-                $menu['total_terjual'] = (int) $total;
-                $hasil[] = $menu;
+
+            if (!$menus->has($menuId)) {
+                continue;
             }
+
+            $menu =
+                $menus
+                    ->get($menuId)
+                    ->toArray();
+
+            $menu['total_terjual'] =
+                (int) $total;
+
+            $hasil[] = $menu;
         }
 
         return $hasil;
     }
 
     /**
- * Mengambil menu yang paling mirip dengan menu tertentu.
- * Digunakan untuk fitur "Sering Dibeli Bersama".
- */
-public function rekomendasiMenuPendamping(int $menuId): array
-{
-    // Bangun matriks interaksi
-    $matriks = $this->buatMatriksInteraksi();
+     * =========================================================
+     * 11. MENU YANG SERING DIBELI BERSAMA
+     *
+     * Ini menggunakan ID PESANAN,
+     * bukan rating.
+     * =========================================================
+     */
+    public function rekomendasiMenuPendamping(
+        int $menuId
+    ): array {
 
-    // Hitung similarity antar menu
-    $similarity = $this->hitungSimilarityAntarMenu($matriks);
+        /*
+         * Cari semua transaksi yang mengandung
+         * menu target.
+         */
+        $pesananIds = DB::table('detail_pesanan')
+            ->where('id_menu', $menuId)
+            ->pluck('id_pesanan');
 
-    // Ambil K menu yang paling mirip
-    $neighbors = $this->nearestNeighbor($similarity, $menuId);
-
-    if (empty($neighbors)) {
-        return [];
-    }
-
-    $menus = Menu::whereIn('id_menu', array_keys($neighbors))
-        ->get()
-        ->keyBy('id_menu');
-
-    $hasil = [];
-
-    foreach ($neighbors as $id => $score) {
-
-        if (!$menus->has($id)) {
-            continue;
+        if ($pesananIds->isEmpty()) {
+            return [];
         }
 
-        $hasil[] = [
-            'menu' => $menus[$id],
-            'similarity' => round($score, 4),
-        ];
-    }
+        /*
+         * Cari menu lain yang berada
+         * pada transaksi yang sama.
+         */
+        $menuBersama = DB::table('detail_pesanan')
+            ->select(
+                'id_menu',
+                DB::raw(
+                    'COUNT(DISTINCT id_pesanan) AS frekuensi'
+                )
+            )
+            ->whereIn(
+                'id_pesanan',
+                $pesananIds
+            )
+            ->where(
+                'id_menu',
+                '!=',
+                $menuId
+            )
+            ->groupBy('id_menu')
+            ->orderByDesc('frekuensi')
+            ->limit($this->topN)
+            ->get();
 
-    return $hasil;
-}
+        if ($menuBersama->isEmpty()) {
+            return [];
+        }
+
+        $menuIds =
+            $menuBersama
+                ->pluck('id_menu')
+                ->all();
+
+        $menus =
+            Menu::whereIn(
+                'id_menu',
+                $menuIds
+            )
+            ->get()
+            ->keyBy('id_menu');
+
+        $hasil = [];
+
+        foreach ($menuBersama as $item) {
+
+            if (!$menus->has($item->id_menu)) {
+                continue;
+            }
+
+            $hasil[] = [
+                'menu' =>
+                    $menus[$item->id_menu],
+
+                'frekuensi' =>
+                    (int) $item->frekuensi,
+            ];
+        }
+
+        return $hasil;
+    }
 }

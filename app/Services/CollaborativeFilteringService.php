@@ -262,6 +262,123 @@ class CollaborativeFilteringService
 
     /**
      * =========================================================
+     * 7. EVALUASI METRIK
+     * =========================================================
+     *
+     * Membandingkan nilai aktual vs prediksi untuk menghitung:
+     * - MAPE
+     * - Precision
+     * - Recall
+     * - F1 Score
+     *
+     * Nilai dianggap positif jika >= threshold.
+     * =========================================================
+     */
+    public function hitungMetrikEvaluasi(
+        array $nilaiAktual,
+        array $nilaiPrediksi,
+        int $jumlahTop = 5,
+        float $threshold = 4.0
+    ): array {
+        $tp = 0;
+        $fp = 0;
+        $fn = 0;
+        $tn = 0;
+
+        $totalMape = 0.0;
+        $jumlahMape = 0;
+
+        $kunciGabungan = array_values(
+            array_unique(
+                array_merge(
+                    array_keys($nilaiAktual),
+                    array_keys($nilaiPrediksi)
+                )
+            )
+        );
+
+        foreach ($kunciGabungan as $kunci) {
+            $aktual = (float) ($nilaiAktual[$kunci] ?? 0.0);
+            $prediksi = (float) ($nilaiPrediksi[$kunci] ?? 0.0);
+
+            $aktualPositif = $aktual >= $threshold;
+            $prediksiPositif = $prediksi >= $threshold;
+
+            if ($aktualPositif && $prediksiPositif) {
+                $tp++;
+            } elseif (!$aktualPositif && $prediksiPositif) {
+                $fp++;
+            } elseif ($aktualPositif && !$prediksiPositif) {
+                $fn++;
+            } else {
+                $tn++;
+            }
+
+            if ($aktual != 0.0) {
+                $totalMape += abs(($aktual - $prediksi) / $aktual);
+                $jumlahMape++;
+            }
+        }
+
+        $precision = ($tp + $fp) > 0
+            ? $tp / ($tp + $fp)
+            : 0.0;
+
+        $recall = ($tp + $fn) > 0
+            ? $tp / ($tp + $fn)
+            : 0.0;
+
+        $f1Score = ($precision + $recall) > 0
+            ? (2 * $precision * $recall) / ($precision + $recall)
+            : 0.0;
+
+        $mape = $jumlahMape > 0
+            ? ($totalMape / $jumlahMape) * 100
+            : 0.0;
+
+        return [
+            'mape' => round($mape, 4),
+            'precision' => round($precision, 4),
+            'recall' => round($recall, 4),
+            'f1_score' => round($f1Score, 4),
+            'tp' => $tp,
+            'fp' => $fp,
+            'fn' => $fn,
+            'tn' => $tn,
+            'jumlah_data' => count($kunciGabungan),
+            'top_n' => $jumlahTop,
+            'threshold' => $threshold,
+        ];
+    }
+
+    /**
+     * Cetak hasil evaluasi ke terminal.
+     */
+    public function tampilkanMetrikEvaluasi(
+        array $nilaiAktual,
+        array $nilaiPrediksi,
+        int $jumlahTop = 5,
+        float $threshold = 4.0
+    ): void {
+        $hasil = $this->hitungMetrikEvaluasi(
+            $nilaiAktual,
+            $nilaiPrediksi,
+            $jumlahTop,
+            $threshold
+        );
+
+        echo "\n=== MATRiks EVALUASI REKOMENDASI ===\n";
+        echo "MAPE     : " . number_format($hasil['mape'], 4) . "%\n";
+        echo "Precision: " . number_format($hasil['precision'], 4) . "\n";
+        echo "Recall   : " . number_format($hasil['recall'], 4) . "\n";
+        echo "F1 Score : " . number_format($hasil['f1_score'], 4) . "\n";
+        echo "TP/FP/FN/TN: {$hasil['tp']}/{$hasil['fp']}/{$hasil['fn']}/{$hasil['tn']}\n";
+        echo "Threshold: {$hasil['threshold']} | TopN: {$hasil['top_n']}\n";
+        echo "===================================\n";
+    }
+
+    /**
+     * =========================================================
      * 7. REKOMENDASI UNTUK SATU PELANGGAN
      * =========================================================
      */
